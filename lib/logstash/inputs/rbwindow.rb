@@ -6,11 +6,22 @@ require "socket" # for Socket.gethostname
 require "json" 
 require 'base64'
 require "rufus/scheduler"
+require "dalli"
+require "time"
+require "yaml"
+
+require_relative "util/location_constant"
+require_relative "util/postgresql_manager"
+require_relative "util/memcached_config"
+require_relative "store/store_manager"
+
 # Generate a repeating message.
 #
 # This plugin is intented only as an example.
 
 class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
+  include LocationConstant
+
   config_name "rbwindow"
 
   # Schedule of when to periodically poll from the urls
@@ -39,7 +50,12 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
                     NAMESPACE, SERVICE_PROVIDER, SERVICE_PROVIDER_UUID]
     @memcached_server = @memcached_server || MemcachedConfig::servers.first
     @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0, :value_max_bytes => 4000000})
-    @postgresql_manager = PostgresqlManager.new(@memcached, @database_name, @user, @password, @port, @host, @mac_scramble_prefix) 
+    @postgresql_manager = PostgresqlManager.new(@memcached, @database_name, @user, @password, @port, @host, @mac_scramble_prefix)
+   
+    # run this postgresql update at the beggining
+    @postgresql_manager.update
+    @host_name = `hostname -s`.strip
+    @window_time = 0
   end
 
   def run(queue)
@@ -62,11 +78,75 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @scheduler.send(schedule_type, schedule_value, opts) { run_once(queue) }
     @scheduler.join
   end
+  
+  def monitor_task(key)
+    monitor_task = ""
+    case key 
+    when "rb_flow"
+      monitor_task = "flowprocessor_messages"
+    when "rb_location"
+      monitor_task = "locationprocessor_messages"
+    when "rb_nmsp"
+      monitor_task = "nmspprocessor_messages"
+    when "rb_monitor"
+      monitor_task = "monitorprocessor_messages"
+    else
+       monitor_task = "enrichmentstreamtask_messages" 
+    end 
+    monitor_task
+  end
+
+  def make_metric(key,value)
+    metric = { }
+    if key and value and value != 0
+      metric["type"] = "enrichmentstreamtask"
+      metric["monitor"] = monitor_task(key)
+      metric["timestamp"] = Time.now.to_i
+      # TODO: this should be logstash and something else like the node number
+      #metric["sensor_name"] = "logstash-#{@host_name}-#{key}"
+      metric["sensor_name"] = "logstash-0-0-#{key}"
+      metric["value"] = value
+    end
+    metric
+  end
 
   # So we just need to add the code we want on this function
   def run_once(queue)
-    puts ">>>>>>>>>>>>>> Im here in rbwindow running.."
-    @postgresql_manager.update
+    puts "[INFO] > Rbwindow execution: Refresh stores.."
+
+    # Update the stores with database information and updateSalts for MacScrambling
+    if @window_time >= 5
+      @postgresql_manager.update
+      @window_time = 0
+    end
+
+    # Send message to rb_monitor with some flows counter metric
+    to_reset = []
+    puts "getting FLOWS_NUMBER and COUNTER_STORE .."
+    flows_number_store = @memcached.get(FLOWS_NUMBER) || {}
+    counter_store = @memcached.get(COUNTER_STORE) || {}
+    puts "looping over all counter_store"
+    counter_store.each do |key,value|
+      puts "the key here is #{key} and the value is #{value}" 
+      flows_number_store[key] = value
+      to_reset.push(key)
+    
+      metric = make_metric(key,value)     
+      puts "\n Making the new event" 
+      # send the metric as a event
+      unless metric.empty? 
+        e = LogStash::Event.new
+        metric.each { |k,v| e.set(k,v) }
+        decorate(e)
+        queue << e
+      end
+    end
+    puts "Saving the stores.."
+    @memcached.set(FLOWS_NUMBER,flows_number_store)
+    to_reset.each { |key| counter_store[key] = 0 }
+    @memcached.set(COUNTER_STORE,counter_store)
+ 
+    @window_time += 1
   end
 
   def stop
