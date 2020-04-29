@@ -48,7 +48,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @dim_to_druid = [MARKET, MARKET_UUID, ORGANIZATION, ORGANIZATION_UUID,
                     DEPLOYMENT, DEPLOYMENT_UUID, SENSOR_NAME, SENSOR_UUID, 
                     NAMESPACE, SERVICE_PROVIDER, SERVICE_PROVIDER_UUID]
-    @memcached_server = @memcached_server || MemcachedConfig::servers.first
+    @memcached_server = @memcached_server || MemcachedConfig::servers
     @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0, :value_max_bytes => 4000000})
     @postgresql_manager = PostgresqlManager.new(@memcached, @database_name, @user, @password, @port, @host, @mac_scramble_prefix)
    
@@ -112,27 +112,24 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
 
   # So we just need to add the code we want on this function
   def run_once(queue)
-    puts "[INFO] > Rbwindow execution: Refresh stores.."
+    @logger.info()"[INFO] > Rbwindow execution: Refresh stores..")
 
     # Update the stores with database information and updateSalts for MacScrambling
     if @window_time >= 5
+      @logger.info()"[INFO] > Rbwindow execution: Updating postgresql info..")
       @postgresql_manager.update
       @window_time = 0
     end
 
     # Send message to rb_monitor with some flows counter metric
     to_reset = []
-    puts "getting FLOWS_NUMBER and COUNTER_STORE .."
     flows_number_store = @memcached.get(FLOWS_NUMBER) || {}
     counter_store = @memcached.get(COUNTER_STORE) || {}
-    puts "looping over all counter_store"
     counter_store.each do |key,value|
-      puts "the key here is #{key} and the value is #{value}" 
       flows_number_store[key] = value
       to_reset.push(key)
     
       metric = make_metric(key,value)     
-      puts "\n Making the new event" 
       # send the metric as a event
       unless metric.empty? 
         e = LogStash::Event.new
@@ -141,7 +138,6 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
         queue << e
       end
     end
-    puts "Saving the stores.."
     @memcached.set(FLOWS_NUMBER,flows_number_store)
     to_reset.each { |key| counter_store[key] = 0 }
     @memcached.set(COUNTER_STORE,counter_store)
