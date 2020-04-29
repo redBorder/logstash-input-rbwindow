@@ -112,11 +112,11 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
 
   # So we just need to add the code we want on this function
   def run_once(queue)
-    @logger.info()"[INFO] > Rbwindow execution: Refresh stores..")
+    @logger.info("[INFO] > Rbwindow execution: Refresh stores..")
 
     # Update the stores with database information and updateSalts for MacScrambling
     if @window_time >= 5
-      @logger.info()"[INFO] > Rbwindow execution: Updating postgresql info..")
+      @logger.info("[INFO] > Rbwindow execution: Updating postgresql info..")
       @postgresql_manager.update
       @window_time = 0
     end
