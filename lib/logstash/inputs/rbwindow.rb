@@ -13,7 +13,6 @@ require "yaml"
 require_relative "util/location_constant"
 require_relative "util/postgresql_manager"
 require_relative "util/memcached_config"
-require_relative "store/store_manager"
 
 # Generate a repeating message.
 #
@@ -123,6 +122,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
 
     # Send message to rb_monitor with some flows counter metric
     to_reset = []
+
     flows_number_store = @memcached.get(FLOWS_NUMBER) || {}
     counter_store = @memcached.get(COUNTER_STORE) || {}
     counter_store.each do |key,value|
@@ -132,8 +132,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
       metric = make_metric(key,value)     
       # send the metric as a event
       unless metric.empty? 
-        e = LogStash::Event.new
-        metric.each { |k,v| e.set(k,v) }
+        e = LogStash::Event.new(metric)
         decorate(e)
         queue << e
       end
