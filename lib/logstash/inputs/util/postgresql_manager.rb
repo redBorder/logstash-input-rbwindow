@@ -134,9 +134,11 @@ class PostgresqlManager
         # Decoding from Hexadecimal to string
         if json_content["mac_hashing_salt"]
           salt = [json_content["mac_hashing_salt"].to_s].pack('H*')
-          @scrambles_store[row["uuid"].to_s] = {}
-          @scrambles_store[row["uuid"].to_s]["mac_hashing_salt"] = salt.to_s
-          @scrambles_store[row["uuid"].to_s]["mac_prefix"] = @mac_prefix.to_s
+          if salt and !salt.empty?
+            @scrambles_store[row["uuid"].to_s] = {}
+            @scrambles_store[row["uuid"].to_s]["mac_hashing_salt"] = salt.to_s
+            @scrambles_store[row["uuid"].to_s]["mac_prefix"] = @mac_prefix.to_s
+          end
         end
       end
     rescue => e
