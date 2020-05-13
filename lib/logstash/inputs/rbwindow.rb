@@ -55,6 +55,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @postgresql_manager.update
     @host_name = `hostname -s`.strip
     @window_time = 0
+    @number_of_postgresql_updates = 0
   end
 
   def run(queue)
@@ -77,7 +78,17 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @scheduler.send(schedule_type, schedule_value, opts) { run_once(queue) }
     @scheduler.join
   end
-  
+ 
+  # Every day we move the current store to the historical one
+  # And we clean the current one, on that way we keep the data only one day 
+  def clean_stores
+    @logger.info("[INFO] > Rbwindow execution: Cleaning stores..")
+    # Move mobility to mobility-historical
+    store = @memcached.get("mobility") || {}
+    @memcached.set("mobility-historical",store)
+    @memcached.set("mobility",{})
+  end
+ 
   def monitor_task(key)
     monitor_task = ""
     case key 
@@ -118,6 +129,11 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
       @logger.info("[INFO] > Rbwindow execution: Updating postgresql info..")
       @postgresql_manager.update
       @window_time = 0
+      @number_of_postgresql_updates += 1
+      if @number_of_postgresql_updates == 2 # A day has 1440 minutes / 5 minutes = 288 times 
+        @number_of_postgresql_updates = 0
+        clean_stores
+      end
     end
 
     # Send message to rb_monitor with some flows counter metric
