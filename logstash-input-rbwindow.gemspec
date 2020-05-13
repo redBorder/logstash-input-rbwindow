@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'logstash-input-rbwindow'
-  s.version = '1.0.8'
+  s.version = '1.0.9'
   s.licenses = ['GNU Affero General Public License']
   s.summary = "Refresh stores and reset flows and counters."
   s.description     = "This gem is a Logstash plugin required to be installed on top of the Logstash core pipeline using $LS_HOME/bin/logstash-plugin install gemname. This gem is not a stand-alone program"

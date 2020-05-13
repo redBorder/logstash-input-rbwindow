@@ -83,10 +83,12 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
   # And we clean the current one, on that way we keep the data only one day 
   def clean_stores
     @logger.info("[INFO] > Rbwindow execution: Cleaning stores..")
-    # Move mobility to mobility-historical
-    store = @memcached.get("mobility") || {}
-    @memcached.set("mobility-historical",store)
-    @memcached.set("mobility",{})
+    # Move current store to current_store-historical and wipe current_store
+    ["mobility",LOCATION_STORE,NMSP_STORE_MEASURE, NMSP_STORE_INFO, RADIUS_STORE].each do |store_name|
+      current_store = @memcached.get(store_name) || {}
+      @memcached.set("#{store_name}-historical",current_store)
+      @memcached.set(store_name,{})
+    end
   end
  
   def monitor_task(key)
@@ -130,7 +132,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
       @postgresql_manager.update
       @window_time = 0
       @number_of_postgresql_updates += 1
-      if @number_of_postgresql_updates == 2 # A day has 1440 minutes / 5 minutes = 288 times 
+      if @number_of_postgresql_updates == 288 # A day has 1440 minutes / 5 minutes = 288 times 
         @number_of_postgresql_updates = 0
         clean_stores
       end
