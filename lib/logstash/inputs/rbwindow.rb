@@ -55,7 +55,6 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @postgresql_manager.update
     @host_name = `hostname -s`.strip
     @window_time = 0
-    @number_of_postgresql_updates = 0
   end
 
   def run(queue)
@@ -75,8 +74,15 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
     @scheduler = Rufus::Scheduler.new(:max_work_threads => 1)
     #as of v3.0.9, :first_in => :now doesn't work. Use the following workaround instead
     opts = schedule_type == "every" ? { :first_in => 0.01 } : {} 
+    # Rbwindow Refresh 
+    # Call Refresh store every 5 minutes
     @scheduler.send(schedule_type, schedule_value, opts) { run_once(queue) }
+
+    # Clean store every day at 00:00
+    @scheduler.send("cron", "00 00 * * * UTC", {}) { clean_stores }
     @scheduler.join
+    
+    
   end
  
   # Every day we move the current store to the historical one
@@ -90,7 +96,7 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
       @memcached.set(store_name,{})
     end
   end
- 
+
   def monitor_task(key)
     monitor_task = ""
     case key 
@@ -131,11 +137,6 @@ class LogStash::Inputs::Rbwindow < LogStash::Inputs::Base
       @logger.info("[INFO] > Rbwindow execution: Updating postgresql info..")
       @postgresql_manager.update
       @window_time = 0
-      @number_of_postgresql_updates += 1
-      if @number_of_postgresql_updates == 288 # A day has 1440 minutes / 5 minutes = 288 times 
-        @number_of_postgresql_updates = 0
-        clean_stores
-      end
     end
 
     # Send message to rb_monitor with some flows counter metric
