@@ -1,39 +1,8 @@
-# Logstash Redfish Plugin
+# Logstash Rbwindow Plugin
 
 This is a plugin for [Logstash](https://github.com/elastic/logstash).
 
-The plugin connect to a redfish machine and get the data from the redfish api.
 
-## How to  use
-
-Add the redfish input in your Logstash pipeline as follow:
-
-```sh
-  redfish {
-    ip => "10.10.10.10"
-    api_user => "user"
-    api_key => "key"
-    types => ["thermal", "power"]
-  }
-```
-The parameters supported until now are:
-- ip: IP Address of the redfish machine
-- api_user: The username set in the redfish machine.
-- api_key: The key of the previous user.
-- types: Data that can be extracted from the redfish API, options here are: thermal, power and systems.
-
-The output of the data will be set on the message variable. You can rescue the data and convert to a json with a simple json filter and then keep working on it:
-
-```sh
-filter {
-  if [message] {
-    json {
-      source => [message]
-      target => "message"
-    }
-  }
-}
-```
 ## Developing
 
 ### 1. Plugin Developement and Testing
@@ -41,7 +10,7 @@ filter {
 #### Code
 - To get started, you'll need JRuby with the Bundler gem installed.
 
-- Clone from the GitHub [logstash-input-redfish](https://github.com/redBorder/logstash-input-redfish)
+- Clone from the GitHub [logstash-input-rbwindow](https://github.com/redBorder/logstash-input-rbwindow)
 
 - Install dependencies
 ```sh
@@ -70,7 +39,7 @@ You can use the same **2.1** method to run your plugin in an installed Logstash 
 
 - Build your plugin gem
 ```sh
-gem build logstash-input-redfish.gemspec
+gem build logstash-input-rbwindow.gemspec
 ```
 - Install the plugin from the Logstash home
 ```sh
