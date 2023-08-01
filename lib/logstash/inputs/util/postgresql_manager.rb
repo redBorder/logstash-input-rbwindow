@@ -48,7 +48,7 @@ class PostgresqlManager
     rescue => err
       logger.error("%p during test setup: %s" % [ err.class, err.message ])
       logger.error("Error connection database.")
-      logger.error(*err.backtrace)
+      logger.error(err.backtrace.join("\n"))
     end
     return conn
   end
