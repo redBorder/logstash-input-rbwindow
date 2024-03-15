@@ -10,7 +10,7 @@ require_relative "location_constant"
 
 class PostgresqlManager
   include LocationConstant
-  attr_accessor :enrich_columns, :wlc_sql_store, :store_sensor_sql, 
+  attr_accessor :enrich_columns, :wlc_sql_store, :store_sensor_sql,
                 :conn, :enrich_columns, :last_update, :memcached,
                 :stores_to_update, :database_name, :user, :password, :port, :host, :mac_scramble_prefix
 
@@ -19,15 +19,17 @@ class PostgresqlManager
   def initialize(memcached, database_name, user, password, port, host, mac_scramble_prefix=nil)
      @memcached = memcached
      @enrich_columns = ["campus", "building", "floor", "deployment",
-                           "namespace", "market", "organization", "service_provider", 
-                           "zone", "campus_uuid", "building_uuid", "floor_uuid", 
-                           "deployment_uuid", "namespace_uuid", "market_uuid", "organization_uuid", 
+                           "namespace", "market", "organization", "service_provider",
+                           "zone", "campus_uuid", "building_uuid", "floor_uuid",
+                           "deployment_uuid", "namespace_uuid", "market_uuid", "organization_uuid",
                            "service_provider_uuid", "zone_uuid"]
+     @location_psql_store = @memcached.get(LOC_PSQL_STORE) || {}
      @wlc_sql_store = @memcached.get(WLC_PSQL_STORE) || {}
      @sensor_sql_store = @memcached.get(SENSOR_PSQL_STORE) || {}
      @scrambles_store = {} # its clear everytime we update
      @mac_scramble_prefix = mac_scramble_prefix
-     @stores_to_update = [WLC_PSQL_STORE, SENSOR_PSQL_STORE]
+     @stores_to_update = [WLC_PSQL_STORE, SENSOR_PSQL_STORE, LOC_PSQL_STORE]
+     #@stores_to_update = [WLC_PSQL_STORE, SENSOR_PSQL_STORE]
      @database_name = database_name
      @user = user
      @password = password || get_dbpass_from_config_file
@@ -56,7 +58,7 @@ class PostgresqlManager
   def get_host_from_config_file
    pass = ""
    if File.exist?("/opt/rb/var/www/rb-rails/config/database.yml")
-         production_config = YAML.load_file("/opt/rb/var/www/rb-rails/config/database.yml")      
+         production_config = YAML.load_file("/opt/rb/var/www/rb-rails/config/database.yml")
          pass = production_config["production"]["host"]
    end
    return pass
@@ -65,7 +67,7 @@ class PostgresqlManager
   def get_dbpass_from_config_file
    pass = ""
    if File.exist?("/opt/rb/var/www/rb-rails/config/database.yml")
-         production_config = YAML.load_file("/opt/rb/var/www/rb-rails/config/database.yml")      
+         production_config = YAML.load_file("/opt/rb/var/www/rb-rails/config/database.yml")
          pass = production_config["production"]["password"]
    end
    return pass
@@ -73,7 +75,7 @@ class PostgresqlManager
 
   def update(force = false)
     return nil unless force || need_update?
-    @conn = open_db 
+    @conn = open_db
     @wlc_sql_store = @memcached.get(WLC_PSQL_STORE) || {}
     @sensor_sql_store = @memcached.get(SENSOR_PSQL_STORE) || {}
     @stores_to_update.each { |store_name| update_store(store_name) }
@@ -90,11 +92,25 @@ class PostgresqlManager
   def save_store(store_name)
     return @memcached.set(store_name,@scrambles_store) if store_name == SCRAMBLES_STORE
     return @memcached.set(store_name,@wlc_sql_store) if store_name == WLC_PSQL_STORE
+    return @memcached.set(store_name,@location_psql_store) if store_name = LOC_PSQL_STORE
     return @memcached.set(store_name, @sensor_sql_store) if store_name == SENSOR_PSQL_STORE
   end
 
   def string_is_number?(param)
     true if Float(param) rescue false
+  end
+
+  def find_middle_point(coordinates)
+    location = {}
+    latitudes = coordinates[0].map { |point| point[0] }
+    longitudes = coordinates[0].map { |point| point[1] }
+
+    average_latitude = latitudes.inject(0.0) { |sum, el| sum + el } / latitudes.length
+    average_longitude = longitudes.inject(0.0) { |sum, el| sum + el } / longitudes.length
+
+    location["sensor_latlong"] = "%.6f," % average_latitude + "%.6f" % average_longitude
+
+    return location
   end
 
   def enrich_client_latlong(latitude,longitude)
@@ -106,7 +122,7 @@ class PostgresqlManager
     end
     return location
   end
-  
+
   def enrich_with_columns(param)
     enriching = {}
     @enrich_columns.each { |column_name|  enriching[column_name] = param[column_name] if param[column_name] }
@@ -118,14 +134,14 @@ class PostgresqlManager
       result = @conn.exec(get_sql_query(store_name))
     rescue => e
       logger.error("SQL Exception: Error making query")
-      return nil 
+      return nil
     end
     result
   end
 
   def update_salts(store_name)
     @scrambles_store = {} # clear
-    result = query(store_name) 
+    result = query(store_name)
     return unless result
     begin
       result.each do |row|
@@ -144,7 +160,7 @@ class PostgresqlManager
     rescue => e
       logger.error("[MacScrambling] Database:" + e.to_s)
     end
-    save_store(store_name) 
+    save_store(store_name)
   end
 
   def update_store(store_name)
@@ -152,26 +168,36 @@ class PostgresqlManager
     return unless result
     tmpCache = Hash.new
     key = "mac_address" if store_name == WLC_PSQL_STORE
-    key = "uuid" if store_name == SENSOR_PSQL_STORE
-    result.each do |rs| 
+    key = "uuid" if store_name == SENSOR_PSQL_STORE or store_name == LOC_PSQL_STORE
+    result.each do |rs|
       location = {}
       location.merge!rs["enrichment"] if store_name == WLC_PSQL_STORE && rs["enrichment"]
-      location.merge!(enrich_client_latlong(rs["latitude"], rs["longitude"]))
+      if store_name == LOC_PSQL_STORE
+        if rs["property"]
+          property = JSON.parse(rs["property"])
+          domain_zones = JSON.parse(property["domain_zones"]) rescue nil
+          location.merge!(find_middle_point(domain_zones)) if domain_zones
+        end
+      else
+        location.merge!(enrich_client_latlong(rs["latitude"], rs["longitude"]))
+      end
       location.merge!(enrich_with_columns(rs)) if store_name == WLC_PSQL_STORE
       if rs[key] && !location.empty?
         tmpCache[rs[key]] = location
         @wlc_sql_store[rs[key]] = location if store_name == WLC_PSQL_STORE
         @sensor_sql_store[rs[key]] = location if store_name == SENSOR_PSQL_STORE
+        @location_psql_store[rs[key]] = location if store_name == LOC_PSQL_STORE
       end
     end
     @wlc_sql_store.reject!{ |k,v| !tmpCache.key?k } if store_name == WLC_PSQL_STORE
     @sensor_sql_store.reject!{ |k,v| !tmpCache.key?k } if store_name == SENSOR_PSQL_STORE
-    save_store(store_name)         
+    save_store(store_name)
   end
 
   def get_sql_query(store_name)
      return "SELECT uuid, property FROM sensors WHERE domain_type=6" if store_name == SCRAMBLES_STORE
      return "SELECT uuid, latitude, longitude FROM sensors" if store_name == SENSOR_PSQL_STORE
+     return "SELECT uuid, property FROM sensors" if store_name == LOC_PSQL_STORE
      return ("SELECT DISTINCT ON (access_points.mac_address) access_points.ip_address, access_points.mac_address, access_points.enrichment," +
             " zones.name AS zone, zones.id AS zone_uuid, access_points.latitude AS latitude, access_points.longitude AS longitude, floors.name AS floor, " +
             " floors.uuid AS floor_uuid, buildings.name AS building, buildings.uuid AS building_uuid, campuses.name AS campus, campuses.uuid AS campus_uuid," +

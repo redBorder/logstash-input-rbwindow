@@ -319,4 +319,5 @@ module LocationConstant
   COUNTER_STORE="counterStore" unless defined? COUNTER_STORE
   FLOWS_NUMBER="flowsNumber" unless defined? FLOWS_NUMBER
   LOCATION_STORE="location" unless defined? LOCATION_STORE
+  LOC_PSQL_STORE="location-psql" unless defined? LOC_PSQL_STORE
 end
